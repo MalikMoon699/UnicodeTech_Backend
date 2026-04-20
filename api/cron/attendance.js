@@ -4,18 +4,17 @@ export default async function handler(req, res) {
   try {
     const db = admin.firestore();
 
-    await db.collection("cron_logs").add({
-      type: "attendance-cron",
-      time: admin.firestore.FieldValue.serverTimestamp(),
-      date: today,
-    });
-
-
     const today = new Date().toLocaleDateString("en-CA", {
       timeZone: "Asia/Karachi",
     });
 
     console.log("Running cron for:", today);
+
+    await db.collection("cron_logs").add({
+      type: "attendance-cron",
+      time: admin.firestore.FieldValue.serverTimestamp(),
+      date: today,
+    });
 
     const leaveSnap = await db.collection("leaveRequests").get();
 
