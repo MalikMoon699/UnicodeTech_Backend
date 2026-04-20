@@ -10,40 +10,47 @@ export default async function handler(req, res) {
 
     console.log("Running cron for:", today);
 
-    const leaveSnap = await db
-      .collection("Leaves")
-      .where("isAutoApproved", "==", true)
-      .get();
+    const leaveSnap = await db.collection("leaveRequests").get();
 
-    for (const doc of leaveSnap.docs) {
-      const leave = doc.data();
+    for (const docSnap of leaveSnap.docs) {
+      const leave = docSnap.data();
+
+      const isAutoApproved = leave.isAutoApproved === true;
+      const isManuallyApproved = leave.status === "approved";
+
+      if (!isAutoApproved && !isManuallyApproved) continue;
 
       for (const d of leave.dates || []) {
-        const leaveDate = new Date(d.date).toISOString().split("T")[0];
+        const leaveDate = new Date(d.date).toLocaleDateString("en-CA", {
+          timeZone: "Asia/Karachi",
+        });
 
-        if (leaveDate === today) {
-          for (const userId of leave.users || []) {
-            const ref = db.collection("Attendance").doc(`${userId}_${today}`);
+        if (leaveDate !== today) continue;
 
-            const existing = await ref.get();
-            if (existing.exists) continue;
+        for (const userId of leave.users || []) {
+          const ref = db.collection("Attendance").doc(`${userId}_${today}`);
 
-            await ref.set({
-              userId,
-              date: today,
-              checkIn: null,
-              checkOut: null,
-              hours: null,
-              late: false,
-              lateReason: null,
-              status: "leave",
-              type: "leave",
-              leaveReason: leave.reason || "",
-              createdAt: admin.firestore.FieldValue.serverTimestamp(),
-            });
-
-            console.log(`Leave marked for ${userId}`);
+          const existing = await ref.get();
+          if (existing.exists) {
+            console.log(`Skipping existing attendance for ${userId}`);
+            continue;
           }
+
+          await ref.set({
+            userId,
+            date: today,
+            checkIn: null,
+            checkOut: null,
+            hours: null,
+            late: false,
+            lateReason: null,
+            status: "leave",
+            type: "leave",
+            leaveReason: leave.reason || "",
+            createdAt: admin.firestore.FieldValue.serverTimestamp(),
+          });
+
+          console.log(`Leave marked for ${userId}`);
         }
       }
     }
