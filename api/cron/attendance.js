@@ -23,12 +23,16 @@ export default async function handler(req, res) {
       date: today,
     });
 
-    const usersSnap = await db.collection("UserIndex").get();
+    const usersSnap = await db
+      .collection("UserIndex")
+      .where("role", "!=", "admin")
+      .where("status", "==", "active")
+      .get();
 
     const users = [];
+
     usersSnap.forEach((doc) => {
       const data = doc.data();
-      if (data.role === "admin") return;
 
       users.push({
         userId: data.docId,
@@ -54,7 +58,7 @@ export default async function handler(req, res) {
       for (const userId of leave.users || []) {
         leaveMap.set(userId, {
           reason: leave.reason || "",
-          type: leave.type || "user", 
+          type: leave.type || "user",
         });
       }
     }
