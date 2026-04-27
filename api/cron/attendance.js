@@ -8,7 +8,14 @@ export default async function handler(req, res) {
       timeZone: "Asia/Karachi",
     });
 
-    console.log("Running cron for:", today);
+    const day = new Date().toLocaleString("en-US", {
+      timeZone: "Asia/Karachi",
+      weekday: "long",
+    });
+
+    const isWeekend = day === "Saturday" || day === "Sunday";
+
+    console.log("Running cron for:", today, "Day:", day);
 
     await db.collection("cron_logs").add({
       type: "attendance-cron",
@@ -16,32 +23,92 @@ export default async function handler(req, res) {
       date: today,
     });
 
-    const leaveSnap = await db.collection("leaveRequests").get();
+    const usersSnap = await db.collection("UserIndex").get();
+
+    const users = [];
+    usersSnap.forEach((doc) => {
+      const data = doc.data();
+      if (data.role === "admin") return;
+
+      users.push({
+        userId: doc.id,
+        role: data.role,
+      });
+    });
+
+    const leaveSnap = await db
+      .collection("leaveRequests")
+      .where("leaveDateKeys", "array-contains", today)
+      .get();
+
+    const leaveMap = new Map();
 
     for (const docSnap of leaveSnap.docs) {
       const leave = docSnap.data();
 
-      const isAutoApproved = leave.isAutoApproved === true;
-      const isManuallyApproved = leave.status === "approved";
+      const isApproved =
+        leave.isAutoApproved === true || leave.status === "approved";
 
-      if (!isAutoApproved && !isManuallyApproved) continue;
+      if (!isApproved) continue;
 
-      for (const d of leave.dates || []) {
-        const leaveDate = new Date(d.date).toLocaleDateString("en-CA", {
-          timeZone: "Asia/Karachi",
+      for (const userId of leave.users || []) {
+        leaveMap.set(userId, {
+          reason: leave.reason || "",
+          type: leave.type || "user", 
+        });
+      }
+    }
+
+    for (const user of users) {
+      const userId = user.userId;
+
+      const ref = db.collection("Attendance").doc(`${userId}_${today}`);
+      const existing = await ref.get();
+
+      if (existing.exists) {
+        console.log(`Skipping existing attendance for ${userId}`);
+        continue;
+      }
+
+      const leave = leaveMap.get(userId);
+
+      if (isWeekend) {
+        await ref.set({
+          userId,
+          date: today,
+          checkIn: null,
+          checkOut: null,
+          hours: null,
+          late: false,
+          lateReason: null,
+          status: "weekend",
+          type: "leave",
+          leaveReason: "",
+          createdAt: admin.firestore.FieldValue.serverTimestamp(),
         });
 
-        if (leaveDate !== today) continue;
+        console.log(`Weekend marked for ${userId}`);
+        continue;
+      }
 
-        for (const userId of leave.users || []) {
-          const ref = db.collection("Attendance").doc(`${userId}_${today}`);
+      if (leave) {
+        if (leave.type === "boss") {
+          await ref.set({
+            userId,
+            date: today,
+            checkIn: null,
+            checkOut: null,
+            hours: null,
+            late: false,
+            lateReason: null,
+            status: "byboss",
+            type: "leave",
+            leaveReason: leave.reason,
+            createdAt: admin.firestore.FieldValue.serverTimestamp(),
+          });
 
-          const existing = await ref.get();
-          if (existing.exists) {
-            console.log(`Skipping existing attendance for ${userId}`);
-            continue;
-          }
-
+          console.log(`Boss leave marked for ${userId}`);
+        } else {
           await ref.set({
             userId,
             date: today,
@@ -52,13 +119,31 @@ export default async function handler(req, res) {
             lateReason: null,
             status: "leave",
             type: "leave",
-            leaveReason: leave.reason || "",
+            leaveReason: leave.reason,
             createdAt: admin.firestore.FieldValue.serverTimestamp(),
           });
 
-          console.log(`Leave marked for ${userId}`);
+          console.log(`User leave marked for ${userId}`);
         }
+
+        continue;
       }
+
+      await ref.set({
+        userId,
+        date: today,
+        checkIn: null,
+        checkOut: null,
+        hours: null,
+        late: false,
+        lateReason: null,
+        status: "absent",
+        type: "absent",
+        leaveReason: "",
+        createdAt: admin.firestore.FieldValue.serverTimestamp(),
+      });
+
+      console.log(`Absent marked for ${userId}`);
     }
 
     return res.status(200).json({ success: true });
