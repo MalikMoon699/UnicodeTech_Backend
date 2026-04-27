@@ -31,7 +31,7 @@ export default async function handler(req, res) {
       if (data.role === "admin") return;
 
       users.push({
-        userId: doc.id,
+        userId: data.docId,
         role: data.role,
       });
     });
